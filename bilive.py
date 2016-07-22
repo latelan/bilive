@@ -52,6 +52,7 @@ def heart(opener):
 	roomId = get_room_id(opener)
 	refererHeader = 'http://live.bilibili.com/' + roomId
 	opener.addheaders = [('Referer', refererHeader)]
+	opener.addheaders = [('Origin', 'http://live.bilibili.com')]
 	result = opener.open(heartUrl,postdata)
 	result = result.read()
 	return result
