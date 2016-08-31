@@ -61,7 +61,7 @@ def get_room_id(opener):
 	liveUrl = 'http://live.bilibili.com/'
 	result = opener.open(liveUrl)
 	result = result.read()
-	res = re.search(r'data-room-id="(\d+)"', result)
+	res = re.search(r'data-roomid="(\d+)"', result)
 	if res:
 		return res.group(1)
 	else:
