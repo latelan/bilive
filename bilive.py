@@ -1,84 +1,151 @@
-#coding=UTF-8
-#
-# from lwl12 https://blog.lwl12.com/read/bilibili-live-upgrade.html
-#
-import urllib
-import urllib2
-import cookielib
-import json
+'''
+Create at 2016-11-08
+@author latelan
+'''
+
 import sys
 import os
-import re
-import datetime
 import time
+import requests
+import json
+import re
+import rsa
+from base64 import b64encode
+
+from yundama import YunDaMa
+import config
+
 reload(sys)
 sys.setdefaultencoding('utf-8')
-COOKIE_FILE = 'BILIVE_COOKIES_DATA'
-def login(COOKIE_FILE):
-	cookie = cookielib.MozillaCookieJar(COOKIE_FILE)
-	opener = urllib2.build_opener(urllib2.HTTPCookieProcessor(cookie))  
-	response = opener.open('https://passport.bilibili.com/ajax/miniLogin/minilogin')
-	print'Please input your bilibili Username:'
-	userid = raw_input()
-	print'Please input your bilibili Password:'
-	pwd = raw_input()
-	postdata = urllib.urlencode({
-            	'keep':'0',  
-            	'captcha':'',
-            	'userid':userid,
-            	'pwd':pwd
-        	})    
-	loginUrl = 'https://passport.bilibili.com/ajax/miniLogin/login' 
-	response = opener.open(loginUrl,postdata)
-	liveUrl = 'http://live.bilibili.com/User/getUserInfo' 
-	result = opener.open(liveUrl)
-	cookie.save(ignore_discard=True, ignore_expires=True)
-	return opener
-def check_login(opener):
-	liveUrl = 'http://live.bilibili.com/User/getUserInfo' 
-	result = opener.open(liveUrl)
-	result = result.read()
-	s = json.loads(result)
-	if s["code"] == "REPONSE_OK":
-		return s
+
+COOKIE_FILE = 'BILIVE_COOKIE_FILE'
+
+def login(requester):
+	'''
+	login bilibili and save cookie to file
+	'''
+	userid = config.B_USER
+	pwd = config.B_PWD
+
+	# get key, use rsa encrypt pwd
+	getkey_url = 'https://passport.bilibili.com/login'  
+	param_data = {
+			'act': 'getkey',
+			'_': str(int(time.time()*1000))
+			}
+	res = requester.get(getkey_url, params=param_data)
+	hashkey = res.json()
+	pub_key = rsa.PublicKey.load_pkcs1_openssl_pem(hashkey['key'])
+	enpwd = b64encode(rsa.encrypt((hashkey['hash'] + pwd).encode(), pub_key)).decode()	
+
+	# get captcha
+	captcha_url = 'https://passport.bilibili.com/captcha'
+	res = requester.get(captcha_url)
+	captcha_content = res.content
+	vdcode = get_captcha(captcha_content)
+
+	# login
+	login_url = 'https://passport.bilibili.com/login/dologin'
+	post_data = {
+			'act': 'login',
+			'gourl': 'http://www.bilibili.com/',
+			'keeptime':2592000,
+			'vdcode': vdcode,
+			'userid': userid,
+			'pwd': enpwd
+			}
+	res = requester.post(login_url, data=post_data)
+	cookie = res.request.headers['Cookie']
+	save_cookie(COOKIE_FILE, cookie)
+
+def get_captcha(captcha):
+	'''
+	get result of the captcha, user can implement, here using YunDaMa
+	@param captcha - capthcha content,
+	@return the result of captcha
+	'''
+	username = config.YDM_USER
+	password = config.YDM_PWD
+	ydm = YunDaMa(username, password)
+	captcha = ydm.get_captcha(captcha, 'capthcha.jpg', 'image/jpeg')
+	if not captcha:
+		print'Get captcha failed'
+		exit()
+
+	return captcha
+
+def check_login(requester):
+	'''
+	check login status
+	'''
+	user_url = 'http://live.bilibili.com/User/getUserInfo'
+	res = requester.get(user_url)
+	user = res.json()
+	if user['code'] == 'REPONSE_OK':
+		return user
 	else:
-		print'Login Failed: ' + result.decode('unicode_escape')
+		print'Login Failed: ' + res.text
 		os.remove(COOKIE_FILE)
 		time.sleep(3)
 		exit()
-def heart(opener):
-	postdata = ''
-	heartUrl = 'http://live.bilibili.com/User/userOnlineHeart'
-	roomId = get_room_id(opener)
-	print'RoomId: ' + roomId
-	refererHeader = 'http://live.bilibili.com/' + roomId
-	opener.addheaders = [('Referer', refererHeader)]
-	result = opener.open(heartUrl,postdata)
-	result = result.read()
-	return result
 
-def get_room_id(opener):
-	liveUrl = 'http://live.bilibili.com/'
-	result = opener.open(liveUrl)
-	result = result.read()
-	res = re.search(r'data-roomid="(\d+)"', result)
-	if res:
-		return res.group(1)
+def heart(requester):
+	'''
+	heartbeat
+	'''
+	heart_url = 'http://live.bilibili.com/User/userOnlineHeart'
+	room_id = get_room_id(requester)
+	print'RoomId: ' + room_id
+	referer_header = 'http://live.bilibili.com/' + room_id
+	headers = {'Referer': referer_header}
+	res = requester.get(heart_url, headers=headers)
+	return res.text
+
+def get_room_id(requester):
+	'''
+	get live room id
+	'''
+	live_url = 'http://live.bilibili.com/'
+	res = requester.get(live_url)
+	room_id = re.search(r'data-roomid="(\d+)"', res.text)
+	if room_id:
+		return room_id.group(1)
 	else:
-		print'Get RoomId Failed'
+		print'Get roomid failed'
 		exit()
-			
-cookie = cookielib.MozillaCookieJar(COOKIE_FILE)   
-if not os.path.exists(COOKIE_FILE):
-	opener = login(COOKIE_FILE)
-else:
-	cookie.load(COOKIE_FILE, ignore_discard=True, ignore_expires=True)
-	opener = urllib2.build_opener(urllib2.HTTPCookieProcessor(cookie))
+def save_cookie(filepath, cookie):
+	'''
+	save cookies as json formt
+	"k1=v1; k2=v2" -> "{k1:v1, k2:v2}"
+	'''
+	matcher = re.findall(r'(\S+)=(\S[^;]+)', cookie)	
+	cookies = {}
+	for (k,v) in matcher:
+		cookies[k] = v
+	cookies = json.dumps(cookies)
+	file = open(filepath, 'w')	
+	file.write(cookies)
+	file.close()
 
-s = check_login(opener)
-print'Hello, '+s["data"]["uname"]+'!'
-upr = str(s["data"]['user_next_intimacy'] - s["data"]['user_intimacy'])
-result = heart(opener)
+def get_cookie(filepath):
+	file = open(filepath, 'r')
+	cookie = file.read()
+	file.close()
+	return json.loads(cookie)
+
+
+s = requests.Session()
+if not os.path.exists(COOKIE_FILE):
+	login(s)
+else:
+	cookie_dict = get_cookie(COOKIE_FILE)
+	cookies = requests.utils.cookiejar_from_dict(cookie_dict, cookiejar=None, overwrite=True)
+	s.cookies = cookies
+
+d = check_login(s)
+print'Hello, '+d["data"]["uname"]+'!'
+upr = str(d["data"]['user_next_intimacy'] - d["data"]['user_intimacy'])
+result = heart(s)
 h = json.loads(result)
 if h["code"] != 0:
 	for x in xrange(1,6):
@@ -87,14 +154,13 @@ if h["code"] != 0:
 			time.sleep(2)
 		else:
 			time.sleep(10)
-		result = heart(opener)
+		result = heart(s)
 		h = json.loads(result)
-		if h["code"] != 0:
+		if h ["code"] != 0:
 			continue
 		else:
-			print 'Live Level: '+ str(s["data"]['user_level']) +'\nUpgrade requires: '+ upr +'\nLevel Rank: '+ str(s["data"]['user_level_rank']) +'\nHeart Status: Successful\nHeart Time: ' + time.strftime("%Y-%m-%d %H:%M:%S") + '\nDebug:'+ result.decode('unicode_escape')
+			print 'Live Level: '+ str(d["data"]["user_level"]) +'\nUpgrade requires: '+ upr +'\nLevel Rank: '+ str(d["data"]["user_level_rank"]) +'\nHeart Status: Successful\nHeart Time: ' + time.strftime("%Y-%m-%d %H:%M:%S") + '\nDebug:'+ result.decode('unicode_escape')
 			time.sleep(3)
-			exit()
-	print 'Live Level: '+ str(s["data"]['user_level']) +'\nUpgrade requires: '+ upr +'\nLevel Rank: '+ str(s["data"]['user_level_rank']) +'\nHeart Status: Error\nHeart Time: ' + time.strftime("%Y-%m-%d %H:%M:%S") + '\nDebug:'+ result.decode('unicode_escape')
+	print 'Live Level: '+ str(d["data"]["user_level"]) +'\nUpgrade requires: '+ upr +'\nLevel Rank: '+ str(d["data"]["user_level_rank"]) +'\nHeart Status: Error\nHeart Time: ' + time.strftime("%Y-%m-%d %H:%M:%S") + '\nDebug:'+ result.decode('unicode_escape')
 else:
-	print 'Live Level: '+ str(s["data"]['user_level']) +'\nUpgrade requires: '+ upr +'\nLevel Rank: '+ str(s["data"]['user_level_rank']) +'\nHeart Status: Successful\nHeart Time: ' + time.strftime("%Y-%m-%d %H:%M:%S") + '\nDebug:'+ result.decode('unicode_escape')
+	print 'Live Level: '+ str(d["data"]["user_level"]) +'\nUpgrade requires: '+ upr +'\nLevel Rank: '+ str(d["data"]["user_level_rank"]) +'\nHeart Status: Successful\nHeart Time: ' + time.strftime("%Y-%m-%d %H:%M:%S") + '\nDebug:'+ result.decode('unicode_escape')
