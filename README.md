@@ -4,7 +4,7 @@ Bilive
 向B站发心跳包，实现24h挂机看直播，获得经验值
 
 * Linux
-* Python 2.7
+* Python 2.7 (best >= 2.7.9)
 
 安装python需要的库
 
