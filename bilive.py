@@ -84,7 +84,7 @@ def check_login(requester):
 	if user['code'] == 'REPONSE_OK':
 		return user
 	else:
-		print'Login Failed: ' + res.text
+		print'Login Failed: ' + res.text.decode('unicode_escape')
 		os.remove(COOKIE_FILE)
 		time.sleep(3)
 		exit()
