@@ -94,11 +94,12 @@ def heart(requester):
 	heartbeat
 	'''
 	heart_url = 'http://live.bilibili.com/User/userOnlineHeart'
-	room_id = get_room_id(requester)
-	print'RoomId: ' + room_id
-	referer_header = 'http://live.bilibili.com/' + room_id
-	headers = {'Referer': referer_header}
-	res = requester.get(heart_url, headers=headers)
+	#room_id = get_room_id(requester)
+	#print'RoomId: ' + room_id
+	#referer_header = 'http://live.bilibili.com/' + room_id
+	#headers = {'Referer': referer_header}
+	#res = requester.get(heart_url, headers=headers)
+	res = requester.get(heart_url)
 	return res.text
 
 def get_room_id(requester):
