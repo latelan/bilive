@@ -94,12 +94,11 @@ def heart(requester):
 	heartbeat
 	'''
 	heart_url = 'http://live.bilibili.com/User/userOnlineHeart'
-	#room_id = get_room_id(requester)
-	#print'RoomId: ' + room_id
-	#referer_header = 'http://live.bilibili.com/' + room_id
-	#headers = {'Referer': referer_header}
-	#res = requester.get(heart_url, headers=headers)
-	res = requester.get(heart_url)
+	room_id = get_room_id(requester)
+	print'RoomId: ' + room_id
+	referer_header = 'http://live.bilibili.com/' + room_id
+	headers = {'Referer': referer_header}
+	res = requester.get(heart_url, headers=headers)
 	return res.text
 
 def get_room_id(requester):
@@ -112,8 +111,15 @@ def get_room_id(requester):
 	if room_id:
 		return room_id.group(1)
 	else:
-		print'Get roomid failed'
-		exit()
+		roomid_url = 'http://api.live.bilibili.com/area/newRecom?area=all'
+		res = requests.get(roomid_url)
+		data = res.json()                                                                
+		if 'roomid' in data['data'][0]:                                                  
+			return str(data['data'][0]['roomid'])                                        
+		else:                                                                            
+			print'Get roomid failed'                                                     
+			exit()                     
+			
 def save_cookie(filepath, cookie):
 	'''
 	save cookies as json formt
